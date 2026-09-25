@@ -7,9 +7,11 @@ import android.app.Activity;
 import android.content.ContentProviderOperation;
 import android.content.ContentProviderResult;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.OperationApplicationException;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.RemoteException;
@@ -35,6 +37,7 @@ import java.util.Map;
 public class ContactsX extends CordovaPlugin {
 
     private CallbackContext _callbackContext;
+    private CallbackContext pickerCallbackContext;
     private final String LOG_TAG = "ContactsX";
 
     public static final String READ = Manifest.permission.READ_CONTACTS;
@@ -44,6 +47,7 @@ public class ContactsX extends CordovaPlugin {
 
     public static final int REQ_CODE_PERMISSIONS = 0;
     public static final int REQ_CODE_PICK = 2;
+    public static final int REQ_CODE_PICK_NAME_ONLY = 3;
 
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) {
@@ -57,20 +61,17 @@ public class ContactsX extends CordovaPlugin {
                     returnError(ContactsXErrorCodes.PermissionDenied);
                 }
             } else if (action.equals("pick")) {
-                if (PermissionHelper.hasPermission(this, READ)) {
-                    this.pick();
-                } else {
-                    returnError(ContactsXErrorCodes.PermissionDenied);
-                }
+                this.pickerCallbackContext = callbackContext;
+                this.pick(args.optBoolean(0));
             } else if (action.equals("save")) {
                 if(PermissionHelper.hasPermission(this, WRITE)) {
                     this.save(args);
                 } else {
                     returnError(ContactsXErrorCodes.PermissionDenied);
                 }
-            } else if(action.equals("delete")) {
-                if(PermissionHelper.hasPermission(this, WRITE)) {
-                    this.delete(args);
+            } else if (action.equals("deleteRawContact")) {
+                if (PermissionHelper.hasPermission(this, WRITE)) {
+                    this.deleteRawContact(args);
                 } else {
                     returnError(ContactsXErrorCodes.PermissionDenied);
                 }
@@ -92,34 +93,85 @@ public class ContactsX extends CordovaPlugin {
     }
 
     public void onActivityResult(int requestCode, int resultCode, final Intent intent) {
-        if (requestCode == REQ_CODE_PICK) {
-            if (resultCode == Activity.RESULT_OK) {
-                String contactId = intent.getData().getLastPathSegment();
-                Cursor c = this.cordova.getActivity().getContentResolver().query(ContactsContract.RawContacts.CONTENT_URI,
-                        new String[]{ContactsContract.RawContacts._ID}, ContactsContract.RawContacts.CONTACT_ID + " = " + contactId, null, null);
-                if (!c.moveToFirst()) {
-                    returnError(ContactsXErrorCodes.UnknownError, "Error occurred while retrieving contact raw id");
-                    return;
-                }
-                String id = c.getString(c.getColumnIndex(ContactsContract.RawContacts._ID));
-                c.close();
-
-                JSONObject contact = getContactById(id);
-                if (contact != null) {
-                    this._callbackContext.success(contact);
-                } else {
-                    returnError(ContactsXErrorCodes.UnknownError);
+        if (requestCode == REQ_CODE_PICK_NAME_ONLY) {
+            if (resultCode == Activity.RESULT_OK && intent != null && intent.getData() != null) {
+                ContentResolver contentResolver = this.cordova.getActivity().getContentResolver();
+                try (Cursor cursor = contentResolver.query(
+                        intent.getData(),
+                        new String[]{ContactsContract.Contacts.DISPLAY_NAME_PRIMARY},
+                        null, null, null)) {
+                    if (cursor == null || !cursor.moveToFirst()) {
+                        returnPickerError(ContactsXErrorCodes.NoContactFound, null);
+                        return;
+                    }
+                    String displayName = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY));
+                    String[] nameParts = displayName != null ? displayName.trim().split("\\s+", 2) : new String[]{""};
+                    JSONObject contact = new JSONObject();
+                    contact.put("displayName", displayName);
+                    contact.put("firstName", nameParts.length > 0 ? nameParts[0] : "");
+                    contact.put("familyName", nameParts.length > 1 ? nameParts[1] : "");
+                    contact.put("phoneNumbers", new JSONArray());
+                    this.pickerCallbackContext.success(contact);
+                    this.pickerCallbackContext = null;
+                } catch (Exception exception) {
+                    returnPickerError(ContactsXErrorCodes.UnknownError, exception.getMessage());
                 }
             } else {
-                returnError(ContactsXErrorCodes.UnknownError);
+                returnPickerError(ContactsXErrorCodes.UnknownError, "Contact picker cancelled");
+            }
+            return;
+        }
+        if (requestCode == REQ_CODE_PICK) {
+            if (resultCode == Activity.RESULT_OK && intent != null && intent.getData() != null) {
+                ContentResolver contentResolver = this.cordova.getActivity().getContentResolver();
+                try (Cursor cursor = contentResolver.query(
+                        intent.getData(),
+                        new String[]{
+                                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                                ContactsContract.CommonDataKinds.Phone.NUMBER,
+                                ContactsContract.CommonDataKinds.Phone.TYPE
+                        }, null, null, null)) {
+                    if (cursor == null || !cursor.moveToFirst()) {
+                        returnPickerError(ContactsXErrorCodes.NoContactFound, null);
+                        return;
+                    }
+                    JSONObject contact = new JSONObject();
+                    String displayName = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME));
+                    String number = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER));
+                    int typeCode = cursor.getInt(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.TYPE));
+                    String type = getPhoneType(typeCode);
+                    String[] nameParts = displayName != null ? displayName.trim().split("\\s+", 2) : new String[]{""};
 
+                    contact.put("displayName", displayName);
+                    contact.put("firstName", nameParts.length > 0 ? nameParts[0] : "");
+                    contact.put("familyName", nameParts.length > 1 ? nameParts[1] : "");
+
+                    JSONArray phoneNumbers = new JSONArray();
+                    JSONObject phone = new JSONObject();
+                    phone.put("value", number);
+                    phone.put("type", type);
+                    phoneNumbers.put(phone);
+                    contact.put("phoneNumbers", phoneNumbers);
+
+                    this.pickerCallbackContext.success(contact);
+                    this.pickerCallbackContext = null;
+                } catch (Exception exception) {
+                    returnPickerError(ContactsXErrorCodes.UnknownError, exception.getMessage());
+                }
+            } else {
+                returnPickerError(ContactsXErrorCodes.UnknownError, "Contact picker cancelled");
             }
         }
     }
 
     public void onRequestPermissionResult(int requestCode, String[] permissions,
                                           int[] grantResults) throws JSONException {
-        this.hasPermission();
+        if (requestCode == REQ_CODE_PERMISSIONS &&
+                (grantResults.length == 0 || grantResults[0] != PackageManager.PERMISSION_GRANTED)) {
+            returnError(ContactsXErrorCodes.PermissionDenied);
+        } else {
+            this.hasPermission();
+        }
     }
 
     private void find(JSONArray args) throws JSONException {
@@ -307,49 +359,43 @@ public class ContactsX extends CordovaPlugin {
         return email;
     }
 
-    private void pick() {
-        this.cordova.getThreadPool().execute(() -> {
-            Intent contactPickerIntent = new Intent(Intent.ACTION_PICK, ContactsContract.Contacts.CONTENT_URI);
-            this.cordova.startActivityForResult(this, contactPickerIntent, REQ_CODE_PICK);
+    private void pick(boolean nameOnly) {
+        this.cordova.getActivity().runOnUiThread(() -> {
+            try {
+                Intent contactPickerIntent = new Intent(Intent.ACTION_PICK);
+                contactPickerIntent.setType(nameOnly
+                        ? ContactsContract.Contacts.CONTENT_TYPE
+                        : ContactsContract.CommonDataKinds.Phone.CONTENT_TYPE);
+                this.cordova.startActivityForResult(this, contactPickerIntent,
+                        nameOnly ? REQ_CODE_PICK_NAME_ONLY : REQ_CODE_PICK);
+            } catch (Exception exception) {
+                returnPickerError(ContactsXErrorCodes.UnknownError, exception.getMessage());
+            }
         });
     }
 
-    private JSONObject getContactById(String id) {
-        Cursor c = this.cordova.getActivity().getContentResolver().query(
-                ContactsContract.Data.CONTENT_URI,
-                null,
-                ContactsContract.Data.RAW_CONTACT_ID + " = ? ",
-                new String[]{id},
-                ContactsContract.Data.RAW_CONTACT_ID + " ASC");
-
-        Map<String, Object> fields = new HashMap<>();
-        fields.put("phoneNumbers", true);
-        fields.put("emails", true);
-        Map<String, Object> pickFields = new HashMap<>();
-        pickFields.put("fields", fields);
-
-        try {
-            JSONArray contacts = handleFindResult(c, new ContactsXFindOptions(new JSONObject(pickFields)));
-            if (contacts.length() == 1) {
-                return contacts.getJSONObject(0);
-            }
-        } catch (Exception e) {
-            returnError(ContactsXErrorCodes.UnknownError, e.getMessage());
+    private void returnPickerError(ContactsXErrorCodes errorCode, String message) {
+        if (this.pickerCallbackContext != null) {
+            Map<String, Object> result = new HashMap<>();
+            result.put("code", errorCode.value);
+            result.put("message", message == null ? "" : message);
+            this.pickerCallbackContext.error(new JSONObject(result));
+            this.pickerCallbackContext = null;
         }
-
-        return null;
     }
 
     private void save(JSONArray args) throws JSONException {
         final JSONObject contact = args.getJSONObject(0);
         this.cordova.getThreadPool().execute(() -> {
-            JSONObject res = null;
             String id = performSave(contact);
             if (id != null) {
-                res = getContactById(id);
-            }
-            if (res != null) {
-                _callbackContext.success(res);
+                JSONObject result = new JSONObject();
+                try {
+                    result.put("rawId", id);
+                    _callbackContext.success(result);
+                } catch (JSONException exception) {
+                    returnError(ContactsXErrorCodes.UnknownError, exception.getMessage());
+                }
             } else {
                 returnError(ContactsXErrorCodes.UnknownError);
             }
@@ -642,65 +688,28 @@ public class ContactsX extends CordovaPlugin {
         }
     }
 
-    private void delete(JSONArray args) throws JSONException {
-        final String contactId = args.getString(1);
-        if(contactId.length() < 5) returnError(ContactsXErrorCodes.MatchFailed);
+    private void deleteRawContact(JSONArray args) throws JSONException {
+        final long rawId;
+        try {
+            rawId = Long.parseLong(args.getString(0));
+            if (rawId <= 0) throw new NumberFormatException();
+        } catch (NumberFormatException exception) {
+            returnError(ContactsXErrorCodes.WrongJsonObject);
+            return;
+        }
+
         this.cordova.getThreadPool().execute(() -> {
-            if (performDelete(contactId)) {
-                _callbackContext.success();
-            } else {
-                returnError(ContactsXErrorCodes.UnknownError);
+            try {
+                Uri uri = ContentUris.withAppendedId(ContactsContract.RawContacts.CONTENT_URI, rawId);
+                if (this.cordova.getActivity().getContentResolver().delete(uri, null, null) > 0) {
+                    _callbackContext.success();
+                } else {
+                    returnError(ContactsXErrorCodes.NoContactFound);
+                }
+            } catch (Exception exception) {
+                returnError(ContactsXErrorCodes.UnknownError, exception.getMessage());
             }
         });
-    }
-
-    private boolean performDeleteOld(String id) {
-        int result = 0;
-        Cursor cursor = this.cordova.getActivity().getContentResolver().query(ContactsContract.Contacts.CONTENT_URI,
-                null,
-                ContactsContract.Contacts._ID + " = ?",
-                new String[] { id }, null);
-
-        if (cursor.getCount() == 1) {
-            cursor.moveToFirst();
-            String lookupKey = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY));
-            Uri uri = Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_LOOKUP_URI, lookupKey);
-            result = this.cordova.getActivity().getContentResolver().delete(uri, null, null);
-        } else {
-            LOG.d(LOG_TAG, "Could not find contact with ID");
-        }
-
-        cursor.close();
-
-        return result > 0;
-    }
-    
-    private boolean performDelete(String phone) {
-        int L = 0;
-        Uri contactUri = Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_FILTER_URI, Uri.encode(phone));
-        Cursor cur = this.cordova.getActivity().getContentResolver().query(contactUri, null, null, null, null);
-        try {
-            if (cur.moveToFirst()) {                
-                do {
-//                     if (cur.getString(cur.getColumnIndex(PhoneLookup.DISPLAY_NAME)).equalsIgnoreCase(name)) {
-                        String lookupKey = cur.getString(cur.getColumnIndex(ContactsContract.Contacts.LOOKUP_KEY));
-                        Uri uri = Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_LOOKUP_URI, lookupKey);
-                        this.cordova.getActivity().getContentResolver().delete(uri, null, null);
-//                         return true;
-//                     }
-
-                } while (cur.moveToNext());
-            }
-            L = cur.getCount();
-//             if(L > 1){returnError(ContactsXErrorCodes.MultipleMatches, String.valueOf(L));}
-//             else if(L == 0){ returnError(ContactsXErrorCodes.NoMatches, String.valueOf(L));}
-//             else { returnError(ContactsXErrorCodes.MatchFailed, String.valueOf(cur.getCount()));}
-        } catch (Exception e) {
-            returnError(ContactsXErrorCodes.UnknownError, "Error when I tried to write");
-        } finally {
-            cur.close();
-        }
-        return L > 0;
     }
 
     private void hasPermission() throws JSONException {

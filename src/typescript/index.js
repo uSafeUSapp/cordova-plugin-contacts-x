@@ -22,9 +22,14 @@ var ContactsX = /** @class */ (function () {
     return plu.save.apply(plu, arguments);
   };
 
-  ContactsX.delete = function (id, success, failure) {
+  ContactsX.delete = function (id, phone, success, failure) {
     var plu = plugin();
     return plu.delete.apply(plu, arguments);
+  };
+
+  ContactsX.deleteRawContact = function (rawId, success, failure) {
+    var plu = plugin();
+    return plu.deleteRawContact.apply(plu, arguments);
   };
 
   ContactsX.hasPermission = function (success, failure) {

@@ -20,7 +20,7 @@ class ContactX {
         }
         return labeledValues;
     }
-    
+
     func getPhoneNumbers() -> [NSDictionary] {
         let labeledValues: [NSDictionary] = self.contact.phoneNumbers.map { (ob: CNLabeledValue<CNPhoneNumber>) -> NSDictionary in
             return [

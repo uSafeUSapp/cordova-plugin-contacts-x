@@ -1,5 +1,5 @@
 declare module 'cordova-plugin-contacts-x' {
-  
+
   type ContactType = 'home' |'work' | 'mobile' | 'other';
 
   interface ContactXPhoneNumber {

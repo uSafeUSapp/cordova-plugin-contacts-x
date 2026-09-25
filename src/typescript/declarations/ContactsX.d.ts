@@ -29,7 +29,7 @@ declare module 'cordova-plugin-contacts-x' {
      * @param success
      * @param error
      */
-    static pick(success: (result: ContactX) => void, error: (error: ContactXError) => void);
+    static pick(success: (result: ContactX) => void, error: (error: ContactXError) => void, nameOnly?: boolean);
 
     /**
      * Save or modify a contact
@@ -47,7 +47,10 @@ declare module 'cordova-plugin-contacts-x' {
      * @param success
      * @param error
      */
-    static delete(id: string, success: () => void, error: (error: ContactXError) => void);
+    static delete(id: string, phone: string, success: () => void, error: (error: ContactXError) => void);
+
+    /** Delete an Android raw contact created by this app. */
+    static deleteRawContact(rawId: string, success: () => void, error: (error: ContactXError) => void);
 
     /**
      * Check permission is available

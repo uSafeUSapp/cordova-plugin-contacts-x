@@ -4,7 +4,7 @@ public enum ContactsXErrorCodes {
     UnsupportedAction(1),
     WrongJsonObject(2),
     PermissionDenied(3),
-    NoContactFound(4),
+    NoContactFound(5),
     MultipleMatches(8),
     NoMatches(9),
     MatchFailed(10),

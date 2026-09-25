@@ -20,16 +20,20 @@ var contactsX = {
     exec(success, error, 'ContactsX', 'find', [options]);
   },
 
-  pick: function (success, error) {
-    exec(success, error, 'ContactsX', 'pick', []);
+  pick: function (success, error, nameOnly) {
+    exec(success, error, 'ContactsX', 'pick', [Boolean(nameOnly)]);
   },
-  
+
   save: function (contact, success, error) {
     exec(success, error, 'ContactsX', 'save', [contact]);
   },
 
   delete: function (id, phone, success, error) {
     exec(success, error, 'ContactsX', 'delete', [id,phone]);
+  },
+
+  deleteRawContact: function (rawId, success, error) {
+    exec(success, error, 'ContactsX', 'deleteRawContact', [rawId]);
   },
 
   hasPermission: function (success, error) {

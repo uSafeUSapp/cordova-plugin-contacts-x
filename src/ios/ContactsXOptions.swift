@@ -33,7 +33,7 @@ class ContactXOptions {
     var familyName: String? = nil;
     var phoneNumbers: [ContactXValueTypeOptions]? = nil;
     var emails: [ContactXValueTypeOptions]? = nil;
-    
+
     init(options: NSDictionary?) {
         if(options != nil) {
             id = options?.value(forKey: "id") as? String;
@@ -50,7 +50,7 @@ class ContactXOptions {
             }
         }
     }
-    
+
     private func parsePhoneNumbers(array: [NSDictionary]) -> [ContactXValueTypeOptions] {
         var numbers: [ContactXValueTypeOptions] = [];
         for numberObject in array {
@@ -61,7 +61,7 @@ class ContactXOptions {
         }
         return numbers;
     }
-    
+
     private func parseEmails(array: [NSDictionary]) -> [ContactXValueTypeOptions] {
         var mails: [ContactXValueTypeOptions] = [];
         for mailObject in array {
@@ -78,7 +78,7 @@ class ContactXValueTypeOptions {
     var id: String? = nil;
     var type: String;
     var value: String;
-    
+
     init(options: NSDictionary) {
         id = options.value(forKey: "id") as? String;
         type = options.value(forKey: "type") as? String ?? "";
